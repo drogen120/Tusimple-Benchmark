@@ -169,6 +169,9 @@ class Mobilenet_Lane_Net(object):
             scope='MobilenetV1'):
         """SSD network definition.
         """
+        print ("11111111111111111111")
+        print (tf.shape(inputs))
+        print ("11111111111111111111")
         r = mobilenet_lane_net(inputs,
                     num_classes=self.params.num_classes,
                     feat_layers=self.params.feat_layers,
@@ -195,7 +198,6 @@ class Mobilenet_Lane_Net(object):
         """
         if part_num == 0:
             return lane_net_losses(logits, gt_maps,
-                              match_threshold=match_threshold,
                               negative_ratio=negative_ratio,
                               alpha=alpha,
                               label_smoothing=label_smoothing,
@@ -540,11 +542,12 @@ def lane_net_losses(logits, gt_maps,
 
         logits = tf.layers.flatten(logits)
         gt = tf.layers.flatten(gt_maps)
+        print (logits.get_shape().as_list())
+        print (gt.get_shape().as_list())
 
         # Add cross-entropy loss.
-        with tf.name_scope('cross_entropy_pos'):
-            loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits,
-                                                                  labels=gt)
+        with tf.name_scope('L2_loss'):
+            loss = tf.nn.l2_loss(logits - gt) 
             loss = tf.div(loss, batch_size, name='value')
             tf.losses.add_loss(loss)
 

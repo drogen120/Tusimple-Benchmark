@@ -14,7 +14,7 @@ DATA_FORMAT = 'NHWC'
 # Fine-Tuning Flags.
 # =========================================================================== #
 tf.app.flags.DEFINE_string(
-    'checkpoint_path', './checkpoints/',
+    'checkpoint_path', './checkpoints/mobilenet_v1_1.0_224.ckpt',
     'The path to a checkpoint from which to fine-tune.')
 tf.app.flags.DEFINE_string(
     'checkpoint_model_scope', None,
@@ -94,6 +94,10 @@ tf.app.flags.DEFINE_float(
     'moving_average_decay', None,
     'The decay to use for the moving average.'
     'If left as None, then moving averages are not used.')
+tf.app.flags.DEFINE_integer(
+    'batch_size', 8,
+    'traing batch size'
+)
 FLAGS = tf.app.flags.FLAGS
 
 def _parse_function(example_proto):
@@ -123,6 +127,10 @@ def _parse_function(example_proto):
     shape = parsed_features['image/shape']
     width = parsed_features['image/width']
     height = parsed_features['image/height']
+    channels= parsed_features['image/channels']
+    # print height.get_shape().as_list()
+    # image_decoded = tf.reshape(image_decoded, shape) 
+    image_decoded.set_shape([720, 1280, 3])
     return image_decoded, [line1, line2, line3, line4, line5], ysamples, shape
 
 def update_gt_map(x_index, y_index, gt_map):
@@ -183,8 +191,9 @@ def gt_encoder(training_element, gred_size=56):
     gt_maps = []
     images_resized = []
     for i in range(BATCH_SIZE):
-        image_reshape = tf.reshape(img[i], img_shape[i])
-        image_resize = tf.image.resize_images(image_reshape, [448, 448])
+        # image_reshape = tf.reshape(img[i], img_shape[i])
+        # print image_reshape.get_shape().as_list()
+        image_resize = tf.image.resize_images(img[i], [448, 448])
         x_gred = x_greds[i, :, :]
         y_gred = y_greds[i, :, :]
         line_num = 0
@@ -193,11 +202,12 @@ def gt_encoder(training_element, gred_size=56):
         result = tf.while_loop(gt_cond, gt_body, [line_num, index, x_gred, y_gred,
                                             gt_map])
         gt_maps.append(result[4])
+        images_resized.append(image_resize)
 
     images_resized = tf.stack(images_resized)
     gt_maps = tf.stack(gt_maps)
 
-    return img, gt_maps, img_shape
+    return images_resized, gt_maps, img_shape
 
 def main(_):
     tf.logging.set_verbosity(tf.logging.DEBUG)
@@ -212,53 +222,54 @@ def main(_):
         dataset = dataset.shuffle(buffer_size=100)
         dataset = dataset.repeat(10)
         dataset = dataset.batch(BATCH_SIZE)
+        print dataset.output_shapes
         iterator = dataset.make_initializable_iterator()
         next_element = iterator.get_next()
         img, gt_maps, img_shape = gt_encoder(next_element)
-        print tf.shape(img)
+        print img.get_shape().as_list()
         print tf.shape(gt_maps)
         print tf.shape(img_shape)
         summaries = set(tf.get_collection(tf.GraphKeys.SUMMARIES))
         summaries.add(tf.summary.image("input_image", tf.cast(img, tf.float32)))
         summaries.add(tf.summary.image("gt_map", tf.cast(tf.expand_dims(gt_maps, -1), tf.float32)))
        
-        # net_class = nets_factory.get_network('mobilenet_lane_net')
-        # net_params = net_class.default_params._replace(num_classes=1)
-        # lane_net = net_class(net_params)
-        # net_shape = lane_net.params.img_shape
+        net_class = nets_factory.get_network('mobilenet_lane_net')
+        net_params = net_class.default_params._replace(num_classes=1)
+        lane_net = net_class(net_params)
+        net_shape = lane_net.params.img_shape
 
-        # arg_scope = lane_net.arg_scope(weight_decay=0.00004,
-                                       # data_format=DATA_FORMAT)
+        arg_scope = lane_net.arg_scope(weight_decay=0.00004,
+                                       data_format=DATA_FORMAT)
 
-        # with slim.arg_scope(arg_scope):
-            # lane_prediction, lane_logits, end_points = \
-                    # lane_net.net(img, is_training = True)
+        with slim.arg_scope(arg_scope):
+            lane_prediction, lane_logits, end_points = \
+                    lane_net.net(img, is_training = True)
 
-        # lane_net.losses(lane_logits, gt_maps, 0)
-        # total_loss = tf.losses.get_total_loss()
-        # summaries.add(tf.summary.scalar('loss', total_loss))
+        lane_net.losses(lane_logits, gt_maps, 0)
+        total_loss = tf.losses.get_total_loss()
+        summaries.add(tf.summary.scalar('loss', total_loss))
 
-        # for loss in tf.get_collection(tf.GraphKeys.LOSSES):
-            # summaries.add(tf.summary.scalar(loss.op.name, loss))
+        for loss in tf.get_collection(tf.GraphKeys.LOSSES):
+            summaries.add(tf.summary.scalar(loss.op.name, loss))
 
-        # for variable in tf.trainable_variables():
-            # summaries.add(tf.summary.histogram(variable.op.name, variable))
+        for variable in tf.trainable_variables():
+            summaries.add(tf.summary.histogram(variable.op.name, variable))
 
-        # with tf.name_scope('Optimizer'):
-            # learning_rate = tf_utils.configure_learning_rate(
-                # FLAGS, 700, global_step
-            # ) 
-            # optimizer = tf_utils.configure_optimizer(FLAGS, learning_rate)
+        with tf.name_scope('Optimizer'):
+            learning_rate = tf_utils.configure_learning_rate(
+                FLAGS, 700, global_step
+            ) 
+            optimizer = tf_utils.configure_optimizer(FLAGS, learning_rate)
 
-        # summaries.add(tf.summary.scalar('learning_rate', learning_rate))
+        summaries.add(tf.summary.scalar('learning_rate', learning_rate))
 
-        # extra_update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
-        # with tf.control_dependencies(extra_update_ops):
-            # train_op = slim.learning.create_train_op(
-                # total_loss,
-                # optimizer,
-                # summarize_gradients=False
-            # )
+        extra_update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+        with tf.control_dependencies(extra_update_ops):
+            train_op = slim.learning.create_train_op(
+                total_loss,
+                optimizer,
+                summarize_gradients=False
+            )
             
         summary_op = tf.summary.merge(list(summaries), name='summary_op')
         train_writer = tf.summary.FileWriter('./logs/', sess.graph)
@@ -268,38 +279,38 @@ def main(_):
                                                      # exclude_patterns=['_box',
                                                                       # '_fpn'])
         # restorer = tf.train.Saver(variables_to_restore)
-        # saver = tf.train.Saver(max_to_keep=5,
-                              # keep_checkpoint_every_n_hours=1.0,
-                              # write_version=2,
-                              # pad_step_number=False)
+        saver = tf.train.Saver(max_to_keep=5,
+                              keep_checkpoint_every_n_hours=1.0,
+                              write_version=2,
+                              pad_step_number=False)
 
         sess.run(tf.global_variables_initializer())
-        # sess.run(iterator.initializer)
         # restorer.restore(sess, FLAGS.checkpoint_path)
 
-        # i = 0
-        # with slim.queues.QueueRunners(sess):
-            # while (i < FLAGS.max_number_of_steps):
-                # _, summary_str = sess.run([train_op, summary_op])
-                # if i % 50 == 0:
-                    # global_step_str = global_step.eval()
-                    # print('%d iteration' % (global_step_str))
-                    # train_writer.add_summary(summary_str, global_step_str)
-                # if i % 100 == 0:
-                    # global_step_str = global_step.eval()
-                    # saver.save(sess, "./logs/", global_step=global_step_str)
-
-                # i += 1
-
+        i = 0
         with slim.queues.QueueRunners(sess):
-            i = 0
             sess.run(iterator.initializer)
-            while (i < 3):
-                _, summary_str = sess.run([gt_maps, summary_op])
-                global_step_str = global_step.eval()
-                train_writer.add_summary(summary_str, global_step_str)
+            while (i < FLAGS.max_number_of_steps):
+                _, summary_str = sess.run([train_op, summary_op])
+                if i % 50 == 0:
+                    global_step_str = global_step.eval()
+                    print('%d iteration' % (global_step_str))
+                    train_writer.add_summary(summary_str, global_step_str)
+                if i % 100 == 0:
+                    global_step_str = global_step.eval()
+                    saver.save(sess, "./logs/", global_step=global_step_str)
+
                 i += 1
-                print ('====================')
+
+        # with slim.queues.QueueRunners(sess):
+            # i = 0
+            # sess.run(iterator.initializer)
+            # while (i < 3):
+                # _, summary_str = sess.run([gt_maps, summary_op])
+                # global_step_str = global_step.eval()
+                # train_writer.add_summary(summary_str, global_step_str)
+                # i += 1
+                # print ('====================')
 
 if __name__ == '__main__':
     tf.app.run()

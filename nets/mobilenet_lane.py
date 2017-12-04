@@ -425,7 +425,7 @@ def mobilenet_lane_net(inputs,
 
             with tf.variable_scope('Lane_Prediction'):
                 lane_logits = slim.conv2d(end_points[feat_layers[0]],
-                                             1, [3, 3])
+                                             num_classes, [3, 3])
                 lane_prediction = prediction_fn(lane_logits)
     
             # with tf.variable_scope('Box'):
@@ -540,14 +540,14 @@ def lane_net_losses(logits, gt_maps,
         num_classes = lshape[-1]
         batch_size = lshape[0]
 
-        logits = tf.layers.flatten(logits)
-        gt = tf.layers.flatten(gt_maps)
-        print (logits.get_shape().as_list())
-        print (gt.get_shape().as_list())
+        # logits = tf.layers.flatten(logits)
+        # gt = tf.layers.flatten(gt_maps)
+        # print (logits.get_shape().as_list())
+        # print (gt.get_shape().as_list())
 
         # Add cross-entropy loss.
         with tf.name_scope('L2_loss'):
-            loss = tf.nn.l2_loss(logits - gt) 
+            loss = tf.nn.l2_loss(logits - gt_maps) 
             loss = tf.div(loss, batch_size, name='value')
             tf.losses.add_loss(loss)
 

@@ -39,7 +39,7 @@ tf.app.flags.DEFINE_integer('max_number_of_steps', 9000000,
 tf.app.flags.DEFINE_float(
     'weight_decay', 0.00004, 'The weight decay on the model weights.')
 tf.app.flags.DEFINE_string(
-    'optimizer', 'rmsprop',
+    'optimizer', 'adam',
     'The name of the optimizer, one of "adadelta", "adagrad", "adam",'
     '"ftrl", "momentum", "sgd" or "rmsprop".')
 tf.app.flags.DEFINE_float(
@@ -201,7 +201,9 @@ def gt_encoder(training_element, gred_size=56):
         gt_map = tf.zeros([56, 56], tf.float32)
         result = tf.while_loop(gt_cond, gt_body, [line_num, index, x_gred, y_gred,
                                             gt_map])
-        gt_maps.append(result[4])
+        background_map = tf.ones([56, 56], tf.float32)
+        gt_result = tf.stack([background_map-gt_map, result[4]], axis=-1)
+        gt_maps.append(gt_result)
         images_resized.append(image_resize)
 
     images_resized = tf.stack(images_resized)
@@ -220,21 +222,20 @@ def main(_):
         global_step = slim.create_global_step()
         dataset = dataset.map(_parse_function)
         dataset = dataset.shuffle(buffer_size=100)
-        dataset = dataset.repeat(10)
+        dataset = dataset.repeat(900)
         dataset = dataset.batch(BATCH_SIZE)
         print dataset.output_shapes
         iterator = dataset.make_initializable_iterator()
         next_element = iterator.get_next()
         img, gt_maps, img_shape = gt_encoder(next_element)
         print img.get_shape().as_list()
-        print tf.shape(gt_maps)
-        print tf.shape(img_shape)
+        print gt_maps.get_shape().as_list()
         summaries = set(tf.get_collection(tf.GraphKeys.SUMMARIES))
         summaries.add(tf.summary.image("input_image", tf.cast(img, tf.float32)))
-        summaries.add(tf.summary.image("gt_map", tf.cast(tf.expand_dims(gt_maps, -1), tf.float32)))
+        summaries.add(tf.summary.image("gt_map", tf.cast(gt_maps[:,:,:,1:], tf.float32)))
        
         net_class = nets_factory.get_network('mobilenet_lane_net')
-        net_params = net_class.default_params._replace(num_classes=1)
+        net_params = net_class.default_params._replace(num_classes=2)
         lane_net = net_class(net_params)
         net_shape = lane_net.params.img_shape
 
@@ -245,6 +246,9 @@ def main(_):
             lane_prediction, lane_logits, end_points = \
                     lane_net.net(img, is_training = True)
 
+        summaries.add(tf.summary.image("prediction",
+                                       tf.cast(lane_prediction[:,:,:,1:],
+                                                             tf.float32)))
         lane_net.losses(lane_logits, gt_maps, 0)
         total_loss = tf.losses.get_total_loss()
         summaries.add(tf.summary.scalar('loss', total_loss))

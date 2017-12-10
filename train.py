@@ -194,6 +194,8 @@ def gt_encoder(training_element, gred_size=56):
         # image_reshape = tf.reshape(img[i], img_shape[i])
         # print image_reshape.get_shape().as_list()
         image_resize = tf.image.resize_images(img[i], [448, 448])
+        image_resize = tf.image.random_hue(image_resize, 0.3)
+        image_resize = tf.image.per_image_standardization(image_resize)
         x_gred = x_greds[i, :, :]
         y_gred = y_greds[i, :, :]
         line_num = 0
@@ -219,15 +221,17 @@ def main(_):
         tf_recorders = glob.glob('./tf_records/*.tfrecord')
         sess = tf.InteractiveSession()
         dataset = tf.data.TFRecordDataset(tf_recorders)
-        global_step = slim.create_global_step()
+        global_step = tf.train.get_or_create_global_step()
         dataset = dataset.map(_parse_function)
-        dataset = dataset.shuffle(buffer_size=100)
-        dataset = dataset.repeat(900)
+        dataset = dataset.shuffle(buffer_size=200)
+        dataset = dataset.repeat(600)
         dataset = dataset.batch(BATCH_SIZE)
         print dataset.output_shapes
         iterator = dataset.make_initializable_iterator()
         next_element = iterator.get_next()
         img, gt_maps, img_shape = gt_encoder(next_element)
+        img = tf.image.random_brightness(img, 0.3)
+        img = tf.image.random_contrast(img, 0.8, 1.2)
         print img.get_shape().as_list()
         print gt_maps.get_shape().as_list()
         summaries = set(tf.get_collection(tf.GraphKeys.SUMMARIES))
@@ -277,19 +281,19 @@ def main(_):
             
         summary_op = tf.summary.merge(list(summaries), name='summary_op')
         train_writer = tf.summary.FileWriter('./logs/', sess.graph)
-        # variables_to_train = tf.trainable_variables()
-        # variables_to_restore = \
-                # tf.contrib.framework.filter_variables(variables_to_train,
-                                                     # exclude_patterns=['_box',
-                                                                      # '_fpn'])
-        # restorer = tf.train.Saver(variables_to_restore)
+        variables_to_train = tf.trainable_variables()
+        variables_to_restore = \
+                tf.contrib.framework.filter_variables(variables_to_train,
+                                                     exclude_patterns=['Lane_Prediction',
+                                                                      '_fpn'])
+        restorer = tf.train.Saver(variables_to_restore)
         saver = tf.train.Saver(max_to_keep=5,
                               keep_checkpoint_every_n_hours=1.0,
-                              write_version=2,
+                              write_version=tf.train.SaverDef.V2,
                               pad_step_number=False)
 
         sess.run(tf.global_variables_initializer())
-        # restorer.restore(sess, FLAGS.checkpoint_path)
+        restorer.restore(sess, FLAGS.checkpoint_path)
 
         i = 0
         with slim.queues.QueueRunners(sess):

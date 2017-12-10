@@ -185,7 +185,7 @@ class Mobilenet_Lane_Net(object):
     def arg_scope(self, weight_decay=0.0005, data_format='NHWC', is_training= True):
         """Network arg_scope.
         """
-        return mobilenet_lane_net_arg_scope( is_training=is_training, weight_decay = weight_decay, data_format=data_format)
+        return mobilenet_lane_net_arg_scope(is_training=is_training, weight_decay = weight_decay, data_format=data_format)
 
     def losses(self, logits, gt_maps,
                part_num,
@@ -424,8 +424,11 @@ def mobilenet_lane_net(inputs,
                         end_points[feat_layers[i]] + feature_net
 
             with tf.variable_scope('Lane_Prediction'):
-                lane_logits = slim.conv2d(end_points[feat_layers[0]],
-                                             num_classes, [3, 3])
+                lane_net = slim.conv2d(end_points[feat_layers[0]],
+                                             128, [3, 3])
+                lane_net = slim.conv2d(lane_net,
+                                             128, [3, 3])
+                lane_logits = slim.conv2d(lane_net, num_classes, [3, 3])
                 lane_prediction = prediction_fn(lane_logits)
     
             # with tf.variable_scope('Box'):
@@ -464,7 +467,7 @@ def mobilenet_lane_net_arg_scope(is_training=True,
         'is_training': is_training,
         'center': True,
         'scale': True,
-        'decay': 0.9997,
+        'decay': 0.99,
         'epsilon': 0.001,
     }
 
@@ -542,12 +545,22 @@ def lane_net_losses(logits, gt_maps,
 
         # logits = tf.layers.flatten(logits)
         # gt = tf.layers.flatten(gt_maps)
-        # print (logits.get_shape().as_list())
-        # print (gt.get_shape().as_list())
+        print (gt_maps.get_shape().as_list())
+        print (logits.get_shape().as_list())
 
         # Add cross-entropy loss.
-        with tf.name_scope('L2_loss'):
-            loss = tf.nn.l2_loss(logits - gt_maps) 
-            loss = tf.div(loss, batch_size, name='value')
+        with tf.name_scope('spase_softmax_cross_entropy'):
+            loss = tf.nn.softmax_cross_entropy_with_logits(
+                labels=gt_maps,
+                logits=logits
+            )
+            # loss = tf.nn.l2_loss(logits - gt_maps) 
+            # loss = tf.nn.weighted_cross_entropy_with_logits(
+                # targets=gt_maps,
+                # logits=logits,
+                # pos_weight=12
+            # )
+            loss = tf.reduce_mean(loss)
+            # loss = tf.div(loss, batch_size, name='value')
             tf.losses.add_loss(loss)
 

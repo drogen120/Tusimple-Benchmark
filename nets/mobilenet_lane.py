@@ -424,8 +424,8 @@ def mobilenet_lane_net(inputs,
                         end_points[feat_layers[i]] + feature_net
 
             with tf.variable_scope('Lane_Prediction'):
-                lane_net = slim.conv2d(end_points[feat_layers[0]],
-                                             128, [3, 3])
+                lane_net = \
+                custom_layers.non_local_block(end_points[feat_layers[0]])
                 lane_net = slim.conv2d(lane_net,
                                              128, [3, 3])
                 lane_logits = slim.conv2d(lane_net, num_classes, [3, 3])

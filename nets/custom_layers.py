@@ -27,6 +27,7 @@ from tensorflow.python.ops import nn
 from tensorflow.python.ops import init_ops
 from tensorflow.python.ops import variable_scope
 
+slim = tf.contrib.slim
 
 def abs_smooth(x):
     """Smoothed absolute function. Useful to compute an L1 smooth error.
@@ -162,3 +163,29 @@ def channel_to_last(inputs,
         elif data_format == 'NCHW':
             net = tf.transpose(inputs, perm=(0, 2, 3, 1))
         return net
+
+@add_arg_scope
+def non_local_block(inputs,
+                   data_format='NHWC',
+                    scope=None):
+    inputs_shape = inputs.get_shape().as_list()
+    print ("inputs shape = ", inputs_shape)
+    if data_format=='NHWC':
+        batch_size, height, width, channels_num = inputs_shape
+    else:
+        batch_size, channels_num, height, width = inputs_shape
+
+    t_sita = slim.conv2d(inputs, channels_num//2, [1,1])
+    t_phe = slim.conv2d(inputs, channels_num//2, [1,1])
+    t_sita = tf.reshape(t_sita, [-1, channels_num//2])
+    t_phe = tf.reshape(t_phe, [-1, channels_num//2])
+    sita_phe = tf.matmul(t_sita, t_phe, transpose_b=True)
+    sita_phe = tf.nn.softmax(sita_phe)
+    g = slim.conv2d(inputs, channels_num//2, [1,1])
+    g = tf.reshape(g, [-1, channels_num//2])
+    sita_phe_g = tf.matmul(sita_phe, g)
+    sita_phe_g = tf.reshape(sita_phe_g, [batch_size, height, width, channels_num//2])
+    sita_phe_g = slim.conv2d(sita_phe_g, channels_num, [1,1])
+    output = tf.add(inputs, sita_phe_g)
+
+    return output
